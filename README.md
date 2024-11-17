@@ -58,7 +58,7 @@ tools/merger --help
 - Python3 (for the merger script)
     - A JavaScript version may be introduced in the future, but for now, Python3 is required. Contributions are welcome!
 - Use Node.js 23 or higher for ESM support.
-Alternatively, if using Node.js 22, run with the `--experimental-modules` flag to enable ESM functionality.
+Alternatively, if using Node.js 22, run with the `--experimental-require-module` flag to enable ESM functionality.
 ### Client/VSCode Setup
 
 1. Install [Node.js](https://nodejs.org/en) if it’s not installed already.
