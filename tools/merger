@@ -3,100 +3,22 @@ import os
 import re
 import argparse
 import logging
-from typing import OrderedDict
+from collections import OrderedDict
+from typing import List, Set, Dict
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
-visited_files = set()
-
-
-def find_imports(file_path):
-    if file_path in visited_files:
-        return []
-    if file_path in args.exclude:
-        log.debug(f"Excluding {file_path}")
-        return []
-    visited_files.add(file_path)
-    requires = []
-    stack = []
-
-    with open(file_path, "r") as file:
-        content = file.read()
-        matches = re.findall(r'import\s+.+\s+from\s+["\'](.+?)["\']', content)
-        for match in matches:
-            module_path = os.path.realpath(
-                os.path.join(os.path.dirname(file_path), match)
-            )
-            if not module_path.endswith(".js"):
-                module_path += ".js"
-            requires.append(module_path)
-
-    for fname in requires:
-        stack.extend(find_imports(fname))
-
-    stack.append(file_path)
-    return stack
+visited_files: Set[str] = set()
 
 
-def clean_file_content(file_path):
-    with open(file_path, "r") as file:
-        lines = file.readlines()
-
-    cleaned_lines = []
-    if args.single_output:
-        cleaned_lines.append(
-            f"/** -> FILE: {file_path.replace(os.path.join(os.getcwd(), 'build')+os.path.sep,'')} **/\n\n"
-        )
-    replace = []
-    # Probably excessive as I tried multiple tsc output formats
-    # but works
-    for line in lines:
-        if re.match(r'^"use strict";$', line):
-            continue
-        if re.match(r"^Object\.defineProperty\(", line):
-            continue
-        if re.match(r"^exports\.", line):
-            continue
-        if match := re.findall(r"^const\s+(\w+?)\s+=", line):
-            replace.append(match[0] + ".")
-            continue
-        if re.match(r"^import\s+.+\s+from", line):
-            continue
-        for r in replace:
-            line = line.replace(r, "")
-
-        line = re.sub(r"^export\s+default\s+", "", line)
-        line = re.sub(r"^export\s+", "", line)
-
-        cleaned_lines.append(line)
-    cleaned_lines.append("\n\n")
-    return "".join(cleaned_lines)
+def resolve_module_path(file_path: str, module: str) -> str:
+    module_path = os.path.realpath(os.path.join(os.path.dirname(file_path), module))
+    if not module_path.endswith(".js"):
+        module_path += ".js"
+    return module_path
 
 
-def main(args):
-    if os.path.isfile(args.input):
-        log.info(
-            "Got single file input. Only this file and it's local dependencies will be compiled"
-        )
-        stack = find_imports(os.path.realpath(args.input))
-
-    else:
-        # directory - compile all files assuming executing environment
-        # will be responsible for the import order
-        log.info("Got directory input. All files in the directory will be compiled.")
-        stack = []
-        for root, _, files in os.walk(args.input):
-            for file in files:
-                if file.endswith(".js"):
-                    stack.extend(
-                        find_imports(os.path.realpath(os.path.join(root, file)))
-                    )
-    log.debug(stack)
-    final_output = OrderedDict()
-    for module in stack:
-        final_output[module] = clean_file_content(module)
-
+def save_output(final_output: Dict[str, str]):
     if args.single_output:
         with open(args.single_output, "w") as f:
             for content in final_output.values():
@@ -117,6 +39,75 @@ def main(args):
                 f.write(content)
 
 
+def find_imports(file_path: str) -> List[str]:
+    if file_path in visited_files:
+        return []
+    if file_path in args.exclude:
+        log.debug(f"Excluding {file_path}")
+        return []
+    stack: List[str] = []
+
+    visited_files.add(file_path)
+
+    with open(file_path, "r") as file:
+        content = file.read()
+    matches = re.findall(r'import\s+.+\s+from\s+["\'](.+?)["\']', content)
+    for match in matches:
+        module_path = resolve_module_path(file_path, match)
+        stack.extend(find_imports(module_path))
+
+    stack.append(file_path)
+    return stack
+
+
+def clean_file_content(file_path: str) -> str:
+    with open(file_path, "r") as file:
+        lines = file.readlines()
+
+    cleaned_lines = []
+    if args.single_output:
+        cleaned_lines.append(
+            f"/** -> FILE: {file_path.replace(os.path.join(os.getcwd(), 'build')+os.path.sep,'')} **/\n\n"
+        )
+    for line in lines:
+        if re.match(r"^import\s+.+\s+from", line):
+            continue
+        line = re.sub(r"^export\s+default\s+", "", line)
+        line = re.sub(r"^export\s+", "", line)
+
+        cleaned_lines.append(line)
+
+    if args.single_output:
+        cleaned_lines.append("\n\n")
+    return "".join(cleaned_lines)
+
+
+def main():
+    stack: List[str] = []
+    if os.path.isfile(args.input):
+        log.info(
+            "Got single file input. Only this file and it's local dependencies will be compiled"
+        )
+        stack = find_imports(os.path.realpath(args.input))
+
+    else:
+        # directory - compile all files assuming executing environment
+        # will be responsible for the import order
+        log.info("Got directory input. All files in the directory will be compiled.")
+        for root, _, files in os.walk(args.input):
+            for file in files:
+                if file.endswith(".js"):
+                    stack.extend(
+                        find_imports(os.path.realpath(os.path.join(root, file)))
+                    )
+    log.debug(stack)
+    final_output: Dict[str, str] = OrderedDict()
+    for module in stack:
+        final_output[module] = clean_file_content(module)
+
+    save_output(final_output)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", help="Path to the entry", required=True)
@@ -126,12 +117,20 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
     )
+    parser.add_argument(
+        "--log-level",
+        help="Set the logging level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+    )
+
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--single-output", help="Output file path")
     group.add_argument("--multi-output", help="Output directory path")
 
     args = parser.parse_args()
+    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"File or directory not found: {args.input}")
     args.exclude = [os.path.realpath(e) for e in args.exclude]
-    main(args)
+    main()
