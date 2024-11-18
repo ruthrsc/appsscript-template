@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior. Additionally please include:
-1. use `nodejs bugreport.js` (**PLEASE** make sure there is no sensitive information in the output - especially environment variables)
+1. use `node bugreport.js` (**PLEASE** make sure there is no sensitive information in the output - especially environment variables)
 2. or manually provide:
 - Node version
 - Python version
